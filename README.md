@@ -13,6 +13,23 @@ Next.js 16 (App Router, Cache Components) + MySQL via Drizzle ORM.
 `DATABASE_URL` must also be available during `npm run build`: the home and listings pages are
 prerendered from the database and refreshed whenever an admin saves a change.
 
+## Server layout (VPS)
+
+```
+haley/
+  website/          ← this repository (npm run build && npm start)
+  storage/
+    images/         ← uploaded property photos (IMAGES_DIR)
+```
+
+Photos are uploaded from the admin property form, saved to `IMAGES_DIR` with random file names, and
+served by the app at `/images/<file>` (resized on the fly by `next/image`). Deploying new code never
+touches `storage/`, so include `storage/images` in your backups along with the MySQL database.
+The folder is created on the first upload; the app's user needs write access to it.
+
+If you put Nginx in front of the app, client uploads need `client_max_body_size 16m;` (photos can be
+up to 15 MB).
+
 ## Scripts
 
 | Script | What it does |

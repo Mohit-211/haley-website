@@ -8,6 +8,7 @@ import { db, enquiries, leads, properties, provinces, reviews, users } from "@/d
 import { canManageStaff, requireUser } from "@/lib/auth/dal";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { createSession, deleteSession } from "@/lib/auth/session";
+import { deleteImages, uploadedName } from "@/lib/storage";
 import { toPropertyColumns, validate, type PropertyFieldErrors, type PropertyFormValues } from "@/lib/property-validation";
 import { TAGS } from "@/lib/queries";
 import { CANADIAN_PROVINCES, ENQUIRY_STATUSES, LEAD_STATUSES, MAX_REVIEWS, PROPERTY_STATUSES, ROLES, type ActionResult } from "@/lib/types";
@@ -48,6 +49,16 @@ async function uniqueSlug(base: string) {
   }
 }
 
+const photosOf = (p: { imageUrl: string | null; gallery: string[] | null }) => [p.imageUrl, ...(p.gallery ?? [])].filter((u): u is string => !!u);
+
+/** Deletes uploaded photo files that no listing references any more. */
+async function pruneImages(candidates: string[]) {
+  const uploaded = candidates.filter((u) => uploadedName(u));
+  if (!uploaded.length) return;
+  const inUse = new Set((await db.select({ imageUrl: properties.imageUrl, gallery: properties.gallery }).from(properties)).flatMap(photosOf));
+  await deleteImages(uploaded.filter((u) => !inUse.has(u)));
+}
+
 export async function saveProperty(id: number | null, values: PropertyFormValues): Promise<ActionResult<keyof PropertyFieldErrors>> {
   await requireUser();
   const codes = (await db.select({ code: provinces.code }).from(provinces)).map((p) => p.code);
@@ -60,8 +71,11 @@ export async function saveProperty(id: number | null, values: PropertyFormValues
     const slug = await uniqueSlug(slugify(`${columns.title} ${columns.city}`));
     await db.insert(properties).values({ ...columns, slug });
   } else {
-    const res = await db.update(properties).set(columns).where(eq(properties.id, id));
-    if (res[0].affectedRows === 0) return { ok: false, error: "This property no longer exists." };
+    const [before] = await db.select({ imageUrl: properties.imageUrl, gallery: properties.gallery }).from(properties).where(eq(properties.id, id)).limit(1);
+    if (!before) return { ok: false, error: "This property no longer exists." };
+    await db.update(properties).set(columns).where(eq(properties.id, id));
+    const kept = new Set(photosOf(columns));
+    await pruneImages(photosOf(before).filter((u) => !kept.has(u)));
   }
   updateTag(TAGS.properties);
   return { ok: true };
@@ -69,7 +83,9 @@ export async function saveProperty(id: number | null, values: PropertyFormValues
 
 export async function deleteProperty(id: number): Promise<ActionResult> {
   await requireUser();
+  const [before] = await db.select({ imageUrl: properties.imageUrl, gallery: properties.gallery }).from(properties).where(eq(properties.id, id)).limit(1);
   await db.delete(properties).where(eq(properties.id, id));
+  if (before) await pruneImages(photosOf(before));
   updateTag(TAGS.properties);
   refresh();
   return { ok: true };
@@ -219,5 +235,14 @@ export async function deleteReview(id: number): Promise<ActionResult> {
   await db.delete(reviews).where(eq(reviews.id, id));
   updateTag(TAGS.reviews);
   refresh();
+  return { ok: true };
+}
+
+// ---------- Photos ----------
+
+/** Removes a just-uploaded photo the admin discarded before saving, unless a listing already uses it. */
+export async function discardUpload(url: string): Promise<ActionResult> {
+  await requireUser();
+  await pruneImages([url]);
   return { ok: true };
 }

@@ -2,6 +2,7 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
+import { connection } from "next/server";
 import { db, sessions, users } from "@/db";
 
 export const SESSION_COOKIE = "hb_session";
@@ -32,6 +33,9 @@ export async function deleteSession() {
 /** Looks up the signed-in user from the session cookie. Returns null when missing or expired. */
 export async function readSessionUser() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  // Session-derived reads are always request-time. Without this, Next can run the query while
+  // building the per-session App Shell, and the MySQL driver's internal clock reads trip prerendering.
+  await connection();
   if (!token) return null;
   const [row] = await db
     .select({ id: users.id, name: users.name, email: users.email, role: users.role })

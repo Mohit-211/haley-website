@@ -1,12 +1,12 @@
 "use client";
 
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { saveProperty } from "@/app/admin/actions";
 import { AdminCard } from "@/components/admin/AdminShell";
-import { isUrl, toFormValues, validate, type PropertyFieldErrors, type PropertyFormValues } from "@/lib/property-validation";
+import { PhotoManager } from "@/components/admin/PhotoManager";
+import { lines, toFormValues, validate, type PropertyFieldErrors, type PropertyFormValues } from "@/lib/property-validation";
 import { PROPERTY_STATUSES, PROPERTY_TYPES, STATUS_LABEL, type Property, type Province } from "@/lib/types";
 
 export function PropertyForm({ existing, provinces }: { existing?: Property; provinces: Province[] }) {
@@ -14,6 +14,14 @@ export function PropertyForm({ existing, provinces }: { existing?: Property; pro
   const [saving, startSave] = useTransition();
   const [v, setV] = useState<PropertyFormValues>(() => toFormValues(existing, provinces.length === 1 ? provinces[0]!.code : ""));
   const [errors, setErrors] = useState<PropertyFieldErrors>({});
+  const [uploading, setUploading] = useState(false);
+  // Photos are edited as one ordered list; the first is stored as the main image, the rest as the gallery.
+  const photos = [v.image, ...lines(v.gallery)].filter(Boolean);
+  const setPhotos = (update: (prev: string[]) => string[]) =>
+    setV((x) => {
+      const list = update([x.image, ...lines(x.gallery)].filter(Boolean));
+      return { ...x, image: list[0] ?? "", gallery: list.slice(1).join("\n") };
+    });
   const set = (k: keyof PropertyFormValues) => (e: { target: { value: string } }) => setV((x) => ({ ...x, [k]: e.target.value }));
   const codes = provinces.map((p) => p.code);
 
@@ -37,7 +45,6 @@ export function PropertyForm({ existing, provinces }: { existing?: Property; pro
     });
   };
 
-  const preview = v.image.trim();
   return (
     <form onSubmit={submit} noValidate className="mx-auto grid max-w-4xl gap-6">
       <p className="text-sm text-muted-foreground">Fields marked * are required. Anything you leave empty is simply not shown on the public listing.</p>
@@ -94,15 +101,9 @@ export function PropertyForm({ existing, provinces }: { existing?: Property; pro
         </div>
       </AdminCard>
 
-      <AdminCard title="Images">
-        <div className="grid gap-4 p-5 sm:grid-cols-[1fr_160px]">
-          <div className="grid gap-4">
-            <F label="Main image URL" err={errors.image}><input value={v.image} onChange={set("image")} placeholder="https://…" className="field" /></F>
-            <F label="More photos (one URL per line)" err={errors.gallery}><textarea value={v.gallery} onChange={set("gallery")} rows={4} className="field font-mono text-xs" /></F>
-          </div>
-          <div className="aspect-[4/3] overflow-hidden rounded-md border border-border bg-muted sm:aspect-auto sm:h-32">
-            {isUrl(preview) ? <Image src={preview} alt="Preview" width={320} height={240} unoptimized className="h-full w-full object-cover" /> : <p className="flex h-full items-center justify-center text-xs text-muted-foreground">Preview</p>}
-          </div>
+      <AdminCard title="Photos">
+        <div className="p-5">
+          <PhotoManager photos={photos} onChange={setPhotos} onBusyChange={setUploading} error={errors.image ?? errors.gallery} />
         </div>
       </AdminCard>
 
@@ -114,8 +115,8 @@ export function PropertyForm({ existing, provinces }: { existing?: Property; pro
 
       <div className="flex justify-end gap-3">
         <button type="button" onClick={() => router.push("/admin/properties")} className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted">Cancel</button>
-        <button disabled={saving || provinces.length === 0} className="rounded-md bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
-          {saving ? "Saving…" : existing ? "Save changes" : "Create property"}
+        <button disabled={saving || uploading || provinces.length === 0} className="rounded-md bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
+          {uploading ? "Uploading photos…" : saving ? "Saving…" : existing ? "Save changes" : "Create property"}
         </button>
       </div>
     </form>
